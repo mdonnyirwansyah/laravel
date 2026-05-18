@@ -14,7 +14,8 @@ ENV APP_ENV=production \
     PHP_OPCACHE_FAST_SHUTDOWN=1
 
 # System dependencies + PHP extensions in a single layer
-RUN apk add --no-cache \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache \
         supervisor \
         curl \
         unzip \
@@ -106,14 +107,13 @@ COPY . .
 COPY --from=composer /var/www/html/vendor ./vendor
 
 COPY .docker/prod.conf /etc/supervisor/conf.d/supervisord.conf
+COPY .docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN chown -R www-data:www-data /var/www/html \
+RUN chmod +x /usr/local/bin/entrypoint.sh \
+    && chown -R www-data:www-data /var/www/html \
     && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
-
-RUN php artisan config:cache \
-    && php artisan route:cache \
-    && php artisan event:cache
 
 EXPOSE 80 8001
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
