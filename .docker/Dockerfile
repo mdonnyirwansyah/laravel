@@ -100,6 +100,8 @@ CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 # ============================================================
 FROM base AS release
 
+LABEL org.opencontainers.image.source="https://github.com/mdonnyirwansyah/laravel"
+
 COPY . .
 COPY --from=composer /var/www/html/vendor ./vendor
 
