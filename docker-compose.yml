@@ -1,0 +1,15 @@
+name: laravel
+
+networks:
+  default:
+    driver: bridge
+
+services:
+  app:
+    container_name: laravel-app
+    image: laravel
+    restart: unless-stopped
+    ports:
+      - "8001:80"
+    networks:
+      - default

@@ -1,0 +1,22 @@
+name: laravel
+
+networks:
+  default:
+    driver: bridge
+
+services:
+  app:
+    container_name: laravel-app
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile
+      target: dev # Use the production stage locally
+    ports:
+      - "8001:80"
+    volumes:
+      - .:/var/www/html # Hot-reload source in dev
+      - "/var/www/html/node_modules" # Keep node_modules inside container
+      - /var/www/html/vendor # Keep vendor inside container
+      - /var/www/html/bootstrap
+    networks:
+      - default
