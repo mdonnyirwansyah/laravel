@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: laravel
+      POSTGRES_PASSWORD_FILE: /run/secrets/laravel_db_password
+
+    secrets:
+      - laravel_db_password
+
+    volumes:
+      - laravel_data_postgres:/var/lib/postgresql/data
+
+    networks:
+      - laravel_data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d laravel"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    deploy:
+      replicas: 1
+
+  redis:
+    image: redis:7-alpine
+
+    command: ["redis-server", "--appendonly", "yes"]
+
+    volumes:
+      - laravel_data_redis:/data
+
+    networks:
+      - laravel_data
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+    deploy:
+      replicas: 1
+
+networks:
+  laravel_data:
+    name: laravel_data
+    driver: overlay
+    attachable: true
+
+volumes:
+  laravel_data_postgres:
+    name: laravel_data_postgres
+  laravel_data_redis:
+    name: laravel_data_redis
+
+secrets:
+  laravel_db_password:
+    external: true

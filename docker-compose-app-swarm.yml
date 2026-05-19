@@ -1,24 +1,25 @@
 services:
   app:
     image: ghcr.io/mdonnyirwansyah/laravel:latest-arm64
-    ports:
-      - "8001:80"
     networks:
-      - default
+      - laravel_data
+      - laravel_proxy
     secrets:
-      - app_key
-      - db_password
+      - laravel_app_key
+      - laravel_db_password
     environment:
-      - APP_KEY_FILE=/run/secrets/app_key
+      - APP_KEY_FILE=/run/secrets/laravel_app_key
       - APP_DEBUG=false
       - LOG_CHANNEL=stderr
       - LOG_LEVEL=info
       - DB_CONNECTION=pgsql
-      - DB_HOST=192.168.1.11
+      - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_USERNAME=campaign
-      - DB_DATABASE=campaign
-      - DB_PASSWORD_FILE=/run/secrets/db_password
+      - DB_USERNAME=postgres
+      - DB_DATABASE=laravel
+      - DB_PASSWORD_FILE=/run/secrets/laravel_db_password
+      - REDIS_HOST=redis
+      - TRUSTED_PROXIES=*
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/up"]
       interval: 30s
@@ -26,7 +27,7 @@ services:
       retries: 3
       start_period: 20s
     deploy:
-      replicas: 1
+      replicas: 3
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -50,11 +51,13 @@ services:
           memory: 128M
 
 networks:
-  default:
-    driver: overlay
+  laravel_data:
+    external: true
+  laravel_proxy:
+    external: true
 
 secrets:
-  app_key:
+  laravel_app_key:
     external: true
-  db_password:
+  laravel_db_password:
     external: true

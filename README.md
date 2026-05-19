@@ -7,53 +7,230 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
-## About Laravel
+## Deployment
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+This project ships with three Docker setups, each for a different scenario:
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+| File | Purpose |
+| --- | --- |
+| [docker-compose.local.yml](docker-compose.local.yml) | Local development — builds from `.docker/Dockerfile` (target `dev`) with hot-reload source mount. |
+| [docker-compose-data-swarm.yml](docker-compose-data-swarm.yml) + [docker-compose-app-swarm.yml](docker-compose-app-swarm.yml) | Production deployment on Docker Swarm (data tier + app tier). |
+| [docker-compose-proxy-swarm.yml](docker-compose-proxy-swarm.yml) | HTTPS reverse proxy (Nginx + Certbot) in front of the app stack. |
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### 1. Local development (hot-reload)
 
-## Learning Laravel
+```bash
+docker compose -f docker-compose.local.yml up --build
+# → http://localhost:8000
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+Stop & clean up:
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```bash
+docker compose -f docker-compose.local.yml down
+```
 
-## Laravel Sponsors
+### 2. Run the prebuilt production image locally
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+```bash
+docker compose up -d
+# → http://localhost:8001
+```
 
-### Premium Partners
+```bash
+docker compose down
+```
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+### 3. Build & push production image
 
-## Contributing
+Multi-arch images are published to GHCR. Login first if you haven't:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u mdonnyirwansyah --password-stdin
+```
 
-## Code of Conduct
+Tag the build with the current git SHA:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```bash
+export TAG=$(git rev-parse --short HEAD)
+```
 
-## Security Vulnerabilities
+**amd64** (servers, most cloud VMs):
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```bash
+docker buildx build \
+  -f .docker/Dockerfile \
+  --target release \
+  --platform linux/amd64 \
+  --tag ghcr.io/mdonnyirwansyah/laravel:$TAG \
+  --tag ghcr.io/mdonnyirwansyah/laravel:latest \
+  --cache-from type=registry,ref=ghcr.io/mdonnyirwansyah/laravel:buildcache \
+  --cache-to type=registry,ref=ghcr.io/mdonnyirwansyah/laravel:buildcache,mode=max,ignore-error=true \
+  --provenance=true \
+  --sbom=true \
+  --push \
+  .
+```
 
-## License
+**arm64** (Apple Silicon, AWS Graviton, Raspberry Pi):
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```bash
+docker buildx build \
+  -f .docker/Dockerfile \
+  --target release \
+  --platform linux/arm64 \
+  --tag ghcr.io/mdonnyirwansyah/laravel:$TAG-arm64 \
+  --tag ghcr.io/mdonnyirwansyah/laravel:latest-arm64 \
+  --cache-from type=registry,ref=ghcr.io/mdonnyirwansyah/laravel:buildcache-arm64 \
+  --cache-to type=registry,ref=ghcr.io/mdonnyirwansyah/laravel:buildcache-arm64,mode=max,ignore-error=true \
+  --provenance=true \
+  --sbom=true \
+  --push \
+  .
+```
+
+### 4. Production deploy on Docker Swarm
+
+The Swarm setup is split into two stacks so data and app lifecycles are independent:
+
+- `laravel_data` — Postgres + Redis (persistent volumes, internal-only)
+- `laravel` — the Laravel app (3 replicas, rolling update, attaches to `laravel_data` network)
+
+#### One-time prerequisites
+
+```bash
+# Initialize swarm (skip if already active)
+docker swarm init
+
+# Login to GHCR so Swarm nodes can pull the private image.
+# Token is read from ~/.ghcr_token (PAT with read:packages scope).
+cat ~/.ghcr_token | docker login ghcr.io -u mdonnyirwansyah --password-stdin
+
+# Create secrets referenced by the stacks
+echo "your-strong-db-password" | docker secret create laravel_db_password -
+php artisan key:generate --show | xargs -I {} sh -c 'echo "{}" | docker secret create laravel_app_key -'
+
+# Verify
+docker secret ls   # expect: laravel_db_password, laravel_app_key
+```
+
+#### Deploy
+
+Order matters — data tier first, then app tier. Pass `--with-registry-auth` so each Swarm node receives the GHCR credentials needed to pull the private image:
+
+```bash
+docker stack deploy -c docker-compose-data-swarm.yml laravel_data
+docker stack deploy -c docker-compose-app-swarm.yml --with-registry-auth laravel
+```
+
+#### Verify
+
+```bash
+docker stack services laravel_data   # postgres 1/1, redis 1/1
+docker stack services laravel        # app 3/3
+docker service logs laravel_app --tail 50
+curl http://localhost:8001/up
+```
+
+#### Update the app (rolling)
+
+```bash
+docker service update --with-registry-auth --image ghcr.io/mdonnyirwansyah/laravel:latest-arm64 laravel_app
+```
+
+#### Tear down
+
+```bash
+docker stack rm laravel
+docker stack rm laravel_data
+# Volumes (postgres-data, redis-data) persist — remove manually if needed:
+# docker volume rm laravel_data_postgres laravel_data_redis
+```
+
+### 5. HTTPS via Nginx + Certbot (Let's Encrypt)
+
+Reverse proxy stack ([docker-compose-proxy-swarm.yml](docker-compose-proxy-swarm.yml)) sits in front of `laravel_app`. It exposes ports **80** and **443** to the internet — the app no longer publishes its own port.
+
+> Heads-up: Let's Encrypt **does not issue certificates for IP addresses**. While you only have an IP, use a self-signed cert (steps below). Swap to certbot once a domain points at the server.
+
+#### Step 1 — Prepare cert volume (self-signed for IP / pre-domain)
+
+Create the named volumes and seed a self-signed cert so Nginx can start:
+
+```bash
+docker volume create laravel_proxy_certs
+docker volume create laravel_proxy_webroot
+
+docker run --rm -v laravel_proxy_certs:/certs alpine/openssl \
+  req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /certs/privkey.pem \
+  -out    /certs/fullchain.pem \
+  -subj   "/CN=$(curl -s ifconfig.me)"
+```
+
+#### Step 2 — Deploy proxy stack first
+
+```bash
+docker stack deploy -c docker-compose-proxy-swarm.yml laravel_proxy
+docker stack services laravel_proxy   # nginx 1/1
+```
+
+#### Step 3 — (Re)deploy app stack so it joins `laravel_proxy`
+
+```bash
+docker stack deploy -c docker-compose-app-swarm.yml laravel
+```
+
+Test:
+
+```bash
+curl -kI https://<server-ip>/up    # -k skips self-signed warning
+```
+
+#### Step 4 — Switch to Let's Encrypt (once domain is ready)
+
+Point your domain's A record at the server, then issue a real cert via webroot challenge:
+
+```bash
+export DOMAIN=yourdomain.com
+export EMAIL=is.dony77@gmail.com
+
+docker run --rm \
+  -v laravel_proxy_certs:/etc/letsencrypt \
+  -v laravel_proxy_webroot:/var/www/certbot \
+  certbot/certbot certonly \
+    --webroot -w /var/www/certbot \
+    -d $DOMAIN \
+    --email $EMAIL --agree-tos --no-eff-email \
+    --non-interactive
+```
+
+Certbot writes certs into the `laravel_proxy_certs` volume at `live/$DOMAIN/`. Update [.docker/nginx/proxy.conf](.docker/nginx/proxy.conf) to point there:
+
+```nginx
+ssl_certificate     /etc/nginx/certs/live/yourdomain.com/fullchain.pem;
+ssl_certificate_key /etc/nginx/certs/live/yourdomain.com/privkey.pem;
+server_name yourdomain.com;
+```
+
+Reload nginx:
+
+```bash
+docker service update --force laravel_proxy_nginx
+```
+
+#### Step 5 — Auto-renew (cron on host)
+
+Add to host crontab (`crontab -e`):
+
+```cron
+0 3 * * * docker run --rm -v laravel_proxy_certs:/etc/letsencrypt -v laravel_proxy_webroot:/var/www/certbot certbot/certbot renew --quiet && docker service update --force laravel_proxy_nginx
+```
+
+#### Tear down proxy
+
+```bash
+docker stack rm laravel_proxy
+# certs persist in volumes; remove manually if needed:
+# docker volume rm laravel_proxy_certs laravel_proxy_webroot
+```
