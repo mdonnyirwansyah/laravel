@@ -302,9 +302,9 @@ The Nginx proxy ([.docker/nginx/proxy.conf](.docker/nginx/proxy.conf)) ships wit
 
 | Rule | Threshold / Pattern | Action |
 | --- | --- | --- |
-| **Global request rate** per IP | > 30 req/s sustained (burst 60) | Excess → `503` |
-| **Auth endpoint rate** per IP (`/login`, `/register`, `/password*`, `/api/auth*`) | > 5 req/min (burst 3) | Excess → `503` |
-| **Concurrent connections** per IP | > 20 | New conns → `503` |
+| **Global request rate** per IP | > 30 req/s sustained (burst 60) | Excess → `429` |
+| **Auth endpoint rate** per IP (`/login`, `/register`, `/password*`, `/api/auth*`) | > 5 req/min (burst 3) | Excess → `429` |
+| **Concurrent connections** per IP | > 20 | New conns → `429` |
 | **Slowloris / slow-POST** | Body or header idle > 10s; send idle > 10s | Connection closed |
 | **HTTP method** | Anything outside `GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS` | `405 Method Not Allowed` |
 | **Scanner User-Agent** | `nikto`, `sqlmap`, `nmap`, `masscan`, `zgrab`, `fuzzer`, `wpscan` (case-insensitive substring) | `444` (connection dropped, no response) |
@@ -327,10 +327,43 @@ docker stack deploy -c docker-compose-proxy-swarm.yml laravel_proxy
 - Health-checkers (uptime monitors) may send empty UA — give them an explicit `User-Agent` header.
 - Long-running uploads will be killed by `client_body_timeout 10s`; raise it on the specific `location` (e.g. `/api/upload`) rather than globally.
 
+**Why ports 80/443 use `mode: host`**
+
+Docker Swarm's default ingress routing mesh NATs all incoming traffic through the overlay network, so every request reaches nginx with the same source IP (typically `10.0.0.x`). That breaks per-IP rate limiting — a stress test from one device would block every other client on the LAN.
+
+The proxy stack publishes ports in [host mode](https://docs.docker.com/engine/swarm/services/#publish-a-services-ports-directly-on-the-swarm-node) so nginx terminates connections directly on the node, preserving the real client IP. Trade-offs:
+
+- Nginx is pinned to a single node (`node.role == manager`, `replicas: 1`). Scaling out requires `mode: global` + an external L4 LB.
+- No automatic load-balancing across nodes — that's the job of the upstream LB/Cloudflare anyway.
+
+> Note for Docker Desktop on Mac/Windows: even with `mode: host`, external requests pass through Docker Desktop's VM NAT and may still show up as `192.168.65.1`. This limitation does not apply on Linux hosts.
+
 **Inspect rate-limit hits** in the nginx error log:
 
 ```bash
 docker service logs laravel_proxy_nginx --tail 100 | grep -E 'limiting requests|limiting connections'
+```
+
+**Distinguishing `429` from `503` during load testing**
+
+- **`429 Too Many Requests`** → triggered by our nginx rate-limit rules. The app never saw the request. Look for `limiting requests` / `limiting connections` in the error log.
+- **`503 Service Unavailable`** → upstream problem: Laravel returned 5xx, container crashed, or `proxy_pass` timed out. Look for `upstream prematurely closed`, `connect() failed`, or `upstream timed out` in the error log.
+
+If you need to **stress-test without hitting the limiter**, temporarily raise the thresholds in `proxy.conf`:
+
+```nginx
+limit_req_zone  $binary_remote_addr zone=req_global:10m rate=1000r/s;
+# in server block:
+limit_req  zone=req_global burst=2000 nodelay;
+limit_conn conn_per_ip 1000;
+```
+
+Or whitelist the load-tester IP using a `geo` + `map` pair (empty key skips the limit):
+
+```nginx
+geo $limit { default 1; 203.0.113.50/32 0; }
+map $limit $limit_key { 0 ""; 1 $binary_remote_addr; }
+limit_req_zone $limit_key zone=req_global:10m rate=30r/s;
 ```
 
 #### Tear down proxy
