@@ -7,7 +7,7 @@ networks:
 services:
   app:
     container_name: laravel-app
-    image: laravel
+    image: ghcr.io/mdonnyirwansyah/laravel:latest
     restart: unless-stopped
     ports:
       - "8001:80"

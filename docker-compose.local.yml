@@ -1,4 +1,4 @@
-name: laravel
+name: laravel-local
 
 networks:
   default:
@@ -12,7 +12,7 @@ services:
       dockerfile: .docker/Dockerfile
       target: dev # Use the production stage locally
     ports:
-      - "8001:80"
+      - "8000:80"
     volumes:
       - .:/var/www/html # Hot-reload source in dev
       - "/var/www/html/node_modules" # Keep node_modules inside container

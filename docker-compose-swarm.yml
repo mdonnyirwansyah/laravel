@@ -1,0 +1,60 @@
+services:
+  app:
+    image: ghcr.io/mdonnyirwansyah/laravel:latest-arm64
+    ports:
+      - "8001:80"
+    networks:
+      - default
+    secrets:
+      - app_key
+      - db_password
+    environment:
+      - APP_KEY_FILE=/run/secrets/app_key
+      - APP_DEBUG=true
+      - LOG_CHANNEL=stderr
+      - LOG_LEVEL=info
+      - DB_CONNECTION=pgsql
+      - DB_HOST=192.168.1.11
+      - DB_PORT=5432
+      - DB_USERNAME=campaign
+      - DB_DATABASE=campaign
+      - DB_PASSWORD_FILE=/run/secrets/db_password
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+networks:
+  default:
+    driver: overlay
+
+secrets:
+  app_key:
+    external: true
+  db_password:
+    external: true
