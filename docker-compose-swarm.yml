@@ -10,7 +10,7 @@ services:
       - db_password
     environment:
       - APP_KEY_FILE=/run/secrets/app_key
-      - APP_DEBUG=true
+      - APP_DEBUG=false
       - LOG_CHANNEL=stderr
       - LOG_LEVEL=info
       - DB_CONNECTION=pgsql
