@@ -1,0 +1,31 @@
+# ── SelfSigned issuer untuk akses lewat IP lokal ─────────
+# Cert-manager akan generate cert self-signed tiap kali
+# Ingress butuh. Browser akan warning, klik "Proceed".
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}
+---
+# ── Let's Encrypt issuer (untuk domain publik, NON-AKTIF) ─
+# Aktifkan setelah punya domain & DNS sudah mengarah ke
+# IP Ingress. Uncomment, lalu di Ingress ganti:
+#   cert-manager.io/cluster-issuer: selfsigned
+# menjadi:
+#   cert-manager.io/cluster-issuer: letsencrypt-prod
+#
+# apiVersion: cert-manager.io/v1
+# kind: ClusterIssuer
+# metadata:
+#   name: letsencrypt-prod
+# spec:
+#   acme:
+#     server: https://acme-v02.api.letsencrypt.org/directory
+#     email: is.dony77@gmail.com
+#     privateKeySecretRef:
+#       name: letsencrypt-prod-key
+#     solvers:
+#       - http01:
+#           ingress:
+#             ingressClassName: nginx

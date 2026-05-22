@@ -1,0 +1,70 @@
+# ── Ingress AKTIF: akses via IP lokal (HTTPS self-signed) ─
+# Tidak ada `host:` → match semua hostname, termasuk akses
+# langsung ke IP node. Cert-manager auto-issue cert
+# self-signed lewat annotation di bawah.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: laravel
+  namespace: laravel
+  annotations:
+    cert-manager.io/cluster-issuer: selfsigned
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - laravel.local
+      secretName: laravel-tls
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app
+                port:
+                  number: 80
+---
+# ── Ingress DOMAIN (NON-AKTIF) ────────────────────────────
+# Aktifkan kalau sudah punya domain publik yang mengarah ke
+# IP Ingress (A record), DAN ClusterIssuer letsencrypt-prod
+# di 50-issuer.yaml sudah di-uncomment.
+#
+# Langkah aktivasi:
+#   1. Edit `laravel.example.com` di bawah → domain Anda.
+#   2. Uncomment seluruh blok.
+#   3. kubectl apply -f .k8s/proxy/52-ingress.yaml
+#   4. kubectl -n laravel get certificate -w   (tunggu Ready)
+#
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: laravel-domain
+#   namespace: laravel
+#   annotations:
+#     cert-manager.io/cluster-issuer: letsencrypt-prod
+#     nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+#     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+#     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+# spec:
+#   ingressClassName: nginx
+#   tls:
+#     - hosts:
+#         - laravel.example.com
+#       secretName: laravel-tls-domain
+#   rules:
+#     - host: laravel.example.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: app
+#                 port:
+#                   number: 80
