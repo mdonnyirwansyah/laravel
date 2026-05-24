@@ -9,13 +9,15 @@
 
 ## Deployment
 
-This project ships with three Docker setups, each for a different scenario:
+This project provides multiple deployment options:
 
 | File | Purpose |
 | --- | --- |
-| [docker-compose.local.yml](docker-compose.local.yml) | Local development — builds from `.docker/Dockerfile` (target `dev`) with hot-reload source mount. |
-| [docker-compose-data-swarm.yml](docker-compose-data-swarm.yml) + [docker-compose-app-swarm.yml](docker-compose-app-swarm.yml) | Production deployment on Docker Swarm (data tier + app tier). |
-| [docker-compose-proxy-swarm.yml](docker-compose-proxy-swarm.yml) | HTTPS reverse proxy (Nginx + Certbot) in front of the app stack. |
+| [docker-compose.local.yml](docker-compose.local.yml) | Local development — builds from `.docker/Dockerfile` (target `dev`) with hot-reload source mount |
+| [docker-compose-data-swarm.yml](docker-compose-data-swarm.yml) + [docker-compose-app-swarm.yml](docker-compose-app-swarm.yml) | Docker Swarm production deployment (data tier + app tier) |
+| [docker-compose-proxy-swarm.yml](docker-compose-proxy-swarm.yml) | HTTPS reverse proxy (Nginx + Certbot) for Docker Swarm |
+| [podman-compose.yml](podman-compose.yml) | Podman production deployment (app + Postgres + Redis) |
+| [podman-compose-proxy.yaml](podman-compose-proxy.yaml) | HTTPS reverse proxy (Nginx + Certbot) for Podman |
 
 ### 1. Local development (hot-reload)
 
@@ -24,24 +26,13 @@ docker compose -f docker-compose.local.yml up --build
 # → http://localhost:8000
 ```
 
-Stop & clean up:
+Stop and clean up:
 
 ```bash
 docker compose -f docker-compose.local.yml down
 ```
 
-### 2. Run the prebuilt production image locally
-
-```bash
-docker compose up -d
-# → http://localhost:8001
-```
-
-```bash
-docker compose down
-```
-
-### 3. Build & push production image
+### 2. Build and push production image
 
 Multi-arch images are published to GHCR. Login first if you haven't:
 
@@ -89,12 +80,12 @@ docker buildx build \
   .
 ```
 
-### 4. Production deploy on Docker Swarm
+### 3. Production deployment on Docker Swarm
 
-The Swarm setup is split into two stacks so data and app lifecycles are independent:
+The Swarm setup separates data and application lifecycles into independent stacks:
 
-- `laravel_data` — Postgres + Redis (persistent volumes, internal-only)
-- `laravel` — the Laravel app (3 replicas, rolling update, attaches to `laravel_data` network)
+- `laravel_data` — Postgres + Redis (persistent volumes, internal network only)
+- `laravel` — Laravel application (3 replicas, rolling updates, attached to `laravel_data` network)
 
 #### One-time prerequisites
 
@@ -102,8 +93,7 @@ The Swarm setup is split into two stacks so data and app lifecycles are independ
 # Initialize swarm (skip if already active)
 docker swarm init
 
-# Login to GHCR so Swarm nodes can pull the private image.
-# Token is read from ~/.ghcr_token (PAT with read:packages scope).
+# Authenticate with GHCR (requires PAT with read:packages scope)
 cat ~/.ghcr_token | docker login ghcr.io -u mdonnyirwansyah --password-stdin
 
 # Create secrets referenced by the stacks
@@ -116,7 +106,7 @@ docker secret ls   # expect: laravel_db_password, laravel_app_key
 
 #### Deploy
 
-Order matters — data tier first, then app tier. Pass `--with-registry-auth` so each Swarm node receives the GHCR credentials needed to pull the private image:
+Deploy the data tier first, then the app tier. Use `--with-registry-auth` to propagate GHCR credentials to all Swarm nodes:
 
 ```bash
 docker stack deploy -c docker-compose-data-swarm.yml laravel_data
@@ -147,15 +137,15 @@ docker stack rm laravel_data
 # docker volume rm laravel_data_postgres laravel_data_redis
 ```
 
-### 5. HTTPS via Nginx + Certbot (Let's Encrypt)
+### 4. HTTPS via Nginx + Certbot (Let's Encrypt)
 
-Reverse proxy stack ([docker-compose-proxy-swarm.yml](docker-compose-proxy-swarm.yml)) sits in front of `laravel_app`. It exposes ports **80** and **443** to the internet — the app no longer publishes its own port.
+The reverse proxy stack ([docker-compose-proxy-swarm.yml](docker-compose-proxy-swarm.yml)) sits in front of `laravel_app`, exposing ports **80** and **443** to the internet. The app no longer publishes its own port.
 
-> Heads-up: Let's Encrypt **does not issue certificates for IP addresses**. While you only have an IP, use a self-signed cert (steps below). Swap to certbot once a domain points at the server.
+> **Note:** Let's Encrypt **does not issue certificates for IP addresses**. Use a self-signed certificate until a domain is configured, then switch to Certbot.
 
-#### Step 1 — Prepare cert volume (self-signed for IP / pre-domain)
+#### Step 1 — Prepare certificate volumes (self-signed)
 
-Create the named volumes and seed a self-signed cert so Nginx can start:
+Create named volumes and generate a self-signed certificate for initial Nginx startup:
 
 ```bash
 docker volume create laravel_proxy_certs
@@ -213,7 +203,7 @@ ssl_certificate_key /etc/nginx/certs/live/yourdomain.com/privkey.pem;
 server_name yourdomain.com;
 ```
 
-Reload nginx — because the config is stored as an immutable Swarm config, you must remove and redeploy the proxy stack (the cert volume persists):
+Reload Nginx — since Swarm configs are immutable, remove and redeploy the proxy stack (certificate volumes persist):
 
 ```bash
 docker stack rm laravel_proxy && sleep 5
@@ -222,7 +212,7 @@ docker stack deploy -c docker-compose-proxy-swarm.yml laravel_proxy
 
 #### Step 5 — Auto-renew (cron on host)
 
-Add to host crontab (`crontab -e`):
+Add the following entry to the host crontab (`crontab -e`):
 
 ```cron
 0 3 * * * docker run --rm -v laravel_proxy_certs:/etc/letsencrypt -v laravel_proxy_webroot:/var/www/certbot certbot/certbot renew --quiet && docker stack rm laravel_proxy && sleep 5 && docker stack deploy -c /path/to/laravel/docker-compose-proxy-swarm.yml laravel_proxy
@@ -247,7 +237,7 @@ docker stack rm laravel_proxy && sleep 5
 docker stack deploy -c docker-compose-proxy-swarm.yml laravel_proxy
 ```
 
-> ⚠️ Let's Encrypt **HTTP-01 challenge requires port 80 publicly reachable**. If you remap port 80 and certbot can't reach it, switch to **DNS-01 challenge** (verifies via a TXT record). Example with Cloudflare:
+> ⚠️ Let's Encrypt **HTTP-01 challenge requires port 80 to be publicly reachable**. If port 80 is remapped, use the **DNS-01 challenge** instead (verifies ownership via TXT record). Example with Cloudflare:
 > ```bash
 > docker run --rm \
 >   -v laravel_proxy_certs:/etc/letsencrypt \
@@ -257,7 +247,7 @@ docker stack deploy -c docker-compose-proxy-swarm.yml laravel_proxy
 >     -d yourdomain.com -d '*.yourdomain.com' \
 >     --email is.dony77@gmail.com --agree-tos --non-interactive
 > ```
-> The `~/.cloudflare.ini` file holds `dns_cloudflare_api_token = <token>` with Zone:DNS:Edit scope. DNS-01 also enables wildcard certs.
+> The `~/.cloudflare.ini` file requires `dns_cloudflare_api_token = <token>` with `Zone:DNS:Edit` scope. DNS-01 also supports wildcard certificates.
 
 **Add additional domains / subdomains**
 
@@ -292,13 +282,13 @@ certbot ... -d yourdomain.com -d api.yourdomain.com -d www.yourdomain.com
 
 Then redeploy the proxy stack to pick up the new config.
 
-#### Built-in DDoS / abuse mitigation
+#### Built-in DDoS and abuse mitigation
 
-The Nginx proxy ([.docker/nginx/proxy.conf](.docker/nginx/proxy.conf)) ships with a layer of L7 protections that block or throttle abusive traffic **before it reaches Laravel**. No third-party WAF or module is required — everything below uses stock Nginx directives.
+The Nginx proxy ([.docker/nginx/proxy.conf](.docker/nginx/proxy.conf)) includes Layer 7 protections that block or throttle abusive traffic **before it reaches Laravel**. No third-party WAF or additional modules are required — all rules use stock Nginx directives.
 
-> ⚠️ This only mitigates **application-layer (L7)** abuse: HTTP floods, slowloris, brute-force, scanners. **Volumetric (L3/L4) DDoS** — SYN floods, UDP floods, amplification — cannot be stopped by Nginx; for that, put Cloudflare / AWS Shield / a scrubbing service in front.
+> ⚠️ These protections only mitigate **application-layer (L7)** abuse: HTTP floods, slowloris, brute-force, and scanners. **Volumetric (L3/L4) DDoS** attacks (SYN floods, UDP floods, amplification) require an upstream scrubbing service such as Cloudflare or AWS Shield.
 
-**Blocking criteria:**
+**Blocking rules:**
 
 | Rule | Threshold / Pattern | Action |
 | --- | --- | --- |
@@ -312,44 +302,44 @@ The Nginx proxy ([.docker/nginx/proxy.conf](.docker/nginx/proxy.conf)) ships wit
 | **Request body size** | > 10 MB | `413 Payload Too Large` |
 | **Request header size** | > 8 KB × 4 buffers | `400 Bad Request` |
 
-**Tune the thresholds** by editing the `limit_req_zone` / `limit_conn_zone` directives at the top of `proxy.conf`, then redeploy:
+**Adjust thresholds** by editing the `limit_req_zone` / `limit_conn_zone` directives at the top of `proxy.conf`, then redeploy:
 
 ```bash
 docker stack rm laravel_proxy && sleep 5
 docker stack deploy -c docker-compose-proxy-swarm.yml laravel_proxy
 ```
 
-**Adjust the auth-endpoint patterns** if your routes differ — edit the regex in the `location ~ ^/(login|register|password|api/auth)` block. The strict 5/min limit is mainly to defeat credential-stuffing.
+**Modify auth endpoint patterns** by editing the regex in the `location ~ ^/(login|register|password|api/auth)` block. The strict 5 req/min limit is designed to prevent credential-stuffing attacks.
 
-**False positives to watch out for:**
+**Potential false positives:**
 
-- Mobile apps or scrapers behind a single egress IP can hit the per-IP limit — whitelist their CIDR with `geo` + `map` if needed.
-- Health-checkers (uptime monitors) may send empty UA — give them an explicit `User-Agent` header.
-- Long-running uploads will be killed by `client_body_timeout 10s`; raise it on the specific `location` (e.g. `/api/upload`) rather than globally.
+- Clients behind a shared egress IP may trigger per-IP limits — whitelist their CIDR using `geo` + `map` directives.
+- Health-check monitors with empty User-Agent headers will be blocked — configure them to send a valid `User-Agent`.
+- Large file uploads will be terminated by `client_body_timeout 10s` — increase the timeout on specific `location` blocks (e.g., `/api/upload`) rather than globally.
 
 **Why ports 80/443 use `mode: host`**
 
-Docker Swarm's default ingress routing mesh NATs all incoming traffic through the overlay network, so every request reaches nginx with the same source IP (typically `10.0.0.x`). That breaks per-IP rate limiting — a stress test from one device would block every other client on the LAN.
+Docker Swarm's default ingress routing mesh NATs all incoming traffic through the overlay network, causing every request to arrive at Nginx with the same source IP (typically `10.0.0.x`). This breaks per-IP rate limiting.
 
-The proxy stack publishes ports in [host mode](https://docs.docker.com/engine/swarm/services/#publish-a-services-ports-directly-on-the-swarm-node) so nginx terminates connections directly on the node, preserving the real client IP. Trade-offs:
+The proxy stack publishes ports in [host mode](https://docs.docker.com/engine/swarm/services/#publish-a-services-ports-directly-on-the-swarm-node) so Nginx terminates connections directly on the node, preserving the real client IP. Trade-offs:
 
-- Nginx is pinned to a single node (`node.role == manager`, `replicas: 1`). Scaling out requires `mode: global` + an external L4 LB.
-- No automatic load-balancing across nodes — that's the job of the upstream LB/Cloudflare anyway.
+- Nginx is pinned to a single node (`node.role == manager`, `replicas: 1`). Horizontal scaling requires `mode: global` with an external L4 load balancer.
+- No automatic cross-node load balancing — this is delegated to the upstream load balancer or Cloudflare.
 
-> Note for Docker Desktop on Mac/Windows: even with `mode: host`, external requests pass through Docker Desktop's VM NAT and may still show up as `192.168.65.1`. This limitation does not apply on Linux hosts.
+> **Note:** On Docker Desktop (macOS/Windows), external requests pass through the VM NAT and may still appear as `192.168.65.1`. This does not affect Linux hosts.
 
-**Inspect rate-limit hits** in the nginx error log:
+**Inspect rate-limit events** in the Nginx error log:
 
 ```bash
 docker service logs laravel_proxy_nginx --tail 100 | grep -E 'limiting requests|limiting connections'
 ```
 
-**Distinguishing `429` from `503` during load testing**
+**Distinguishing `429` from `503` during load testing:**
 
-- **`429 Too Many Requests`** → triggered by our nginx rate-limit rules. The app never saw the request. Look for `limiting requests` / `limiting connections` in the error log.
-- **`503 Service Unavailable`** → upstream problem: Laravel returned 5xx, container crashed, or `proxy_pass` timed out. Look for `upstream prematurely closed`, `connect() failed`, or `upstream timed out` in the error log.
+- **`429 Too Many Requests`** — triggered by Nginx rate-limit rules; the request never reached the application. Check for `limiting requests` / `limiting connections` in the error log.
+- **`503 Service Unavailable`** — upstream failure: application returned 5xx, container crashed, or `proxy_pass` timed out. Check for `upstream prematurely closed`, `connect() failed`, or `upstream timed out` in the error log.
 
-If you need to **stress-test without hitting the limiter**, temporarily raise the thresholds in `proxy.conf`:
+To **bypass rate limiting during load tests**, temporarily raise the thresholds in `proxy.conf`:
 
 ```nginx
 limit_req_zone  $binary_remote_addr zone=req_global:10m rate=1000r/s;
@@ -358,7 +348,7 @@ limit_req  zone=req_global burst=2000 nodelay;
 limit_conn conn_per_ip 1000;
 ```
 
-Or whitelist the load-tester IP using a `geo` + `map` pair (empty key skips the limit):
+Alternatively, whitelist the load-tester IP using a `geo` + `map` pair (empty key bypasses the limit):
 
 ```nginx
 geo $limit { default 1; 203.0.113.50/32 0; }
@@ -370,6 +360,144 @@ limit_req_zone $limit_key zone=req_global:10m rate=30r/s;
 
 ```bash
 docker stack rm laravel_proxy
-# certs persist in volumes; remove manually if needed:
+# Certificate volumes persist; remove manually if needed:
 # docker volume rm laravel_proxy_certs laravel_proxy_webroot
+```
+
+### 5. Production deployment with Podman
+
+An alternative to Docker Swarm using [Podman](https://podman.io/) and `podman-compose`. The setup consists of two compose projects:
+
+- `proxy` — Nginx reverse proxy with TLS termination ([podman-compose-proxy.yaml](podman-compose-proxy.yaml))
+- `laravel` — Application, Postgres, and Redis ([podman-compose.yml](podman-compose.yml))
+
+The app connects to the proxy via the shared `laravel_proxy` external network.
+
+#### Prerequisites
+
+```bash
+# Verify Podman and podman-compose are installed
+podman --version
+podman-compose --version
+
+# Authenticate with GHCR (requires PAT with read:packages scope)
+cat ~/.ghcr_token | podman login ghcr.io -u mdonnyirwansyah --password-stdin
+```
+
+#### Create secrets
+
+Podman secrets are used for sensitive values (app key and database password):
+
+```bash
+# Generate and store the application key
+php artisan key:generate --show | podman secret create laravel_app_key -
+
+# Store the database password
+echo "your-strong-db-password" | podman secret create laravel_db_password -
+
+# Verify
+podman secret ls   # expect: laravel_app_key, laravel_db_password
+```
+
+#### Step 1 — Prepare certificate volumes (self-signed)
+
+Create named volumes and generate a self-signed certificate for initial Nginx startup:
+
+```bash
+podman volume create laravel_proxy_certs
+podman volume create laravel_proxy_webroot
+
+podman run --rm -v laravel_proxy_certs:/certs alpine/openssl \
+  req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /certs/privkey.pem \
+  -out    /certs/fullchain.pem \
+  -subj   "/CN=$(curl -s ifconfig.me)"
+```
+
+#### Step 2 — Deploy the proxy
+
+The proxy must start first to create the `laravel_proxy` network, which the app stack joins as an external network:
+
+```bash
+podman-compose -f podman-compose-proxy.yaml up -d
+```
+
+#### Step 3 — Deploy the application
+
+```bash
+podman-compose -f podman-compose.yml up -d
+```
+
+#### Verify
+
+```bash
+# Check all containers are running and healthy
+podman ps --format "table {{.Names}}\t{{.Status}}"
+
+# Test the health endpoint
+curl -kI https://localhost/up    # -k skips self-signed certificate warning
+```
+
+#### Update the application
+
+Pull the latest image and recreate the app container:
+
+```bash
+podman-compose -f podman-compose.yml pull app
+podman-compose -f podman-compose.yml up -d app
+```
+
+#### Switch to Let's Encrypt (once domain is ready)
+
+Point your domain's A record at the server, then issue a certificate via webroot challenge:
+
+```bash
+export DOMAIN=yourdomain.com
+export EMAIL=is.dony77@gmail.com
+
+podman run --rm \
+  -v laravel_proxy_certs:/etc/letsencrypt \
+  -v laravel_proxy_webroot:/var/www/certbot \
+  certbot/certbot certonly \
+    --webroot -w /var/www/certbot \
+    -d $DOMAIN \
+    --email $EMAIL --agree-tos --no-eff-email \
+    --non-interactive
+```
+
+Update [.podman/nginx/proxy.conf](.podman/nginx/proxy.conf) to use the issued certificate:
+
+```nginx
+ssl_certificate     /etc/nginx/certs/live/yourdomain.com/fullchain.pem;
+ssl_certificate_key /etc/nginx/certs/live/yourdomain.com/privkey.pem;
+server_name yourdomain.com;
+```
+
+Restart the proxy to apply the new configuration:
+
+```bash
+podman-compose -f podman-compose-proxy.yaml down
+podman-compose -f podman-compose-proxy.yaml up -d
+```
+
+#### Auto-renew (cron on host)
+
+Add the following entry to the host crontab (`crontab -e`):
+
+```cron
+0 3 * * * podman run --rm -v laravel_proxy_certs:/etc/letsencrypt -v laravel_proxy_webroot:/var/www/certbot certbot/certbot renew --quiet && podman-compose -f /path/to/laravel/podman-compose-proxy.yaml restart nginx
+```
+
+#### Tear down
+
+```bash
+# Stop the application stack
+podman-compose -f podman-compose.yml down
+
+# Stop the proxy stack
+podman-compose -f podman-compose-proxy.yaml down
+
+# Data volumes persist; remove manually if needed:
+# podman volume rm laravel_postgres laravel_redis
+# podman volume rm laravel_proxy_certs laravel_proxy_webroot
 ```
