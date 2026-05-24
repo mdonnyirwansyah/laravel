@@ -1,0 +1,94 @@
+name: laravel
+
+services:
+  app:
+    image: ghcr.io/mdonnyirwansyah/laravel:latest-arm64
+    image_pull_policy: always
+    restart: on-failure:3
+    networks:
+      - laravel
+      - laravel_proxy
+    secrets:
+      - laravel_app_key
+      - laravel_db_password
+    environment:
+      - APP_KEY_FILE=/run/secrets/laravel_app_key
+      - APP_DEBUG=false
+      - LOG_CHANNEL=stderr
+      - LOG_LEVEL=info
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=postgres
+      - DB_DATABASE=laravel
+      - DB_PASSWORD_FILE=/run/secrets/laravel_db_password
+      - REDIS_HOST=redis
+      - TRUSTED_PROXIES=*
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  postgres:
+    image: postgres:17-alpine
+    restart: on-failure:5
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=laravel
+      - POSTGRES_PASSWORD_FILE=/run/secrets/laravel_db_password
+    secrets:
+      - laravel_db_password
+    volumes:
+      - laravel_postgres:/var/lib/postgresql/data
+    networks:
+      - laravel
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d laravel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: on-failure:5
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - laravel_redis:/data
+    networks:
+      - laravel
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+networks:
+  laravel:
+    name: laravel
+    driver: bridge
+  laravel_proxy:
+    external: true
+
+volumes:
+  laravel_postgres:
+    name: laravel_postgres
+  laravel_redis:
+    name: laravel_redis
+
+secrets:
+  laravel_app_key:
+    external: true
+  laravel_db_password:
+    external: true

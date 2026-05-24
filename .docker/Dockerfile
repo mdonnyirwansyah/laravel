@@ -92,8 +92,6 @@ RUN composer dump-autoload --optimize
 
 COPY .docker/dev.conf /etc/supervisor/conf.d/supervisord.conf
 
-EXPOSE 8000
-
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 
 # ============================================================
@@ -112,8 +110,6 @@ COPY .docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
     && chown -R www-data:www-data /var/www/html \
     && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
-
-EXPOSE 80 8001
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

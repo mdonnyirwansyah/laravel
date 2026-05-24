@@ -16,3 +16,4 @@ bootstrap/cache/*
 tests
 *.md
 docker-compose*.yml
+podman-compose*.yml

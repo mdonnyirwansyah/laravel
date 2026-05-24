@@ -1,0 +1,31 @@
+name: proxy
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: on-failure:3
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./.podman/nginx/proxy.conf:/etc/nginx/conf.d/default.conf:ro
+      - laravel_proxy_certs:/etc/nginx/certs:ro
+      - laravel_proxy_webroot:/var/www/certbot:ro
+    networks:
+      - laravel_proxy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  laravel_proxy:
+    driver: bridge
+    name: laravel_proxy
+
+volumes:
+  laravel_proxy_certs:
+    name: laravel_proxy_certs
+  laravel_proxy_webroot:
+    name: laravel_proxy_webroot
