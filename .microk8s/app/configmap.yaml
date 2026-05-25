@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: laravel-app
+  namespace: laravel
+data:
+  # ── App ──────────────────────────────────────────────
+  APP_NAME: "Laravel"
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  APP_URL: "http://laravel.local"
+  APP_TIMEZONE: "UTC"
+  APP_LOCALE: "en"
+  APP_FALLBACK_LOCALE: "en"
+  APP_FAKER_LOCALE: "en_US"
+  APP_MAINTENANCE_DRIVER: "file"
+
+  BCRYPT_ROUNDS: "12"
+
+  # ── Logging ──────────────────────────────────────────
+  LOG_CHANNEL: "stderr"
+  LOG_STACK: "single"
+  LOG_DEPRECATIONS_CHANNEL: "null"
+  LOG_LEVEL: "info"
+
+  # ── Database (Postgres) ──────────────────────────────
+  DB_CONNECTION: "pgsql"
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_DATABASE: "laravel"
+  DB_USERNAME: "postgres"
+  DB_CHARSET: "utf8"
+  DB_SCHEMA: "public"
+  DB_SSLMODE: "prefer"
+
+  # ── Session ──────────────────────────────────────────
+  SESSION_DRIVER: "redis"
+  SESSION_CONNECTION: "default"
+  SESSION_LIFETIME: "120"
+  SESSION_ENCRYPT: "false"
+  SESSION_PATH: "/"
+  SESSION_SECURE_COOKIE: "false"
+  SESSION_HTTP_ONLY: "true"
+  SESSION_SAME_SITE: "lax"
+
+  # ── Cache / Queue / Broadcast ────────────────────────
+  CACHE_STORE: "redis"
+  CACHE_PREFIX: "laravel_cache"
+  QUEUE_CONNECTION: "redis"
+  QUEUE_FAILED_DRIVER: "database-uuids"
+  BROADCAST_CONNECTION: "log"
+  FILESYSTEM_DISK: "local"
+
+  # ── Redis ────────────────────────────────────────────
+  REDIS_CLIENT: "phpredis"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_CACHE_DB: "1"
+  REDIS_QUEUE_DB: "2"
+
+  # ── Mail ─────────────────────────────────────────────
+  MAIL_MAILER: "log"
+  MAIL_SCHEME: "null"
+  MAIL_HOST: "127.0.0.1"
+  MAIL_PORT: "2525"
+  MAIL_FROM_ADDRESS: "hello@example.com"
+  MAIL_FROM_NAME: "Laravel"
+
+  # ── Proxy / Trust ────────────────────────────────────
+  TRUSTED_PROXIES: "*"

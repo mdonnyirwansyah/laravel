@@ -33,12 +33,12 @@ spec:
 # ── Ingress DOMAIN (NON-AKTIF) ────────────────────────────
 # Aktifkan kalau sudah punya domain publik yang mengarah ke
 # IP Ingress (A record), DAN ClusterIssuer letsencrypt-prod
-# di 50-issuer.yaml sudah di-uncomment.
+# di clusterissuer.yaml sudah di-uncomment.
 #
 # Langkah aktivasi:
 #   1. Edit `laravel.example.com` di bawah → domain Anda.
 #   2. Uncomment seluruh blok.
-#   3. kubectl apply -f .k8s/proxy/52-ingress.yaml
+#   3. kubectl apply -k .microk8s/proxy
 #   4. kubectl -n laravel get certificate -w   (tunggu Ready)
 #
 # apiVersion: networking.k8s.io/v1

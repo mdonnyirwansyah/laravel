@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Note: namespace tidak di-set di sini karena ClusterIssuer adalah
+# cluster-scoped resource. Ingress sudah punya `namespace: laravel`
+# eksplisit di file-nya.
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: laravel
+      app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - clusterissuer.yaml
+  - ingress.yaml
