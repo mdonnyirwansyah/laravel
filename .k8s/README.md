@@ -357,15 +357,9 @@ Manifest di folder ini di-organize per concern (`data/`, `app/`, `proxy/`) dan d
    ```bash
    kubectl create namespace laravel
    ```
-2. **cert-manager** ter-install (untuk `ClusterIssuer` di `proxy/`):
-   ```bash
-   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
-   ```
-3. **sealed-secrets controller** ter-install (untuk `SealedSecret`):
-   ```bash
-   kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/controller.yaml
-   ```
-4. **Ingress controller** sudah aktif (NGINX Ingress, atau `microk8s enable ingress` untuk microk8s).
+2. **cert-manager** ter-install (untuk `ClusterIssuer` di `proxy/`)
+3. **sealed-secrets controller** ter-install (untuk `SealedSecret`)
+4. **Ingress controller** sudah aktif (NGINX Ingress).
 
 ### Urutan Apply
 
@@ -413,5 +407,3 @@ kubectl delete -k .k8s/data
 # Hapus namespace (akan menghapus semua resource namespaced sekaligus)
 kubectl delete namespace laravel
 ```
-
-> **Catatan untuk MicroK8s**: gunakan folder `.microk8s/` (struktur identik, beberapa nilai disesuaikan untuk single-node microk8s). Ganti `.k8s/` dengan `.microk8s/` di semua command di atas. Pastikan addon yang dibutuhkan aktif: `microk8s enable dns ingress hostpath-storage cert-manager`.
