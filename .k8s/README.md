@@ -398,6 +398,93 @@ kubectl -n laravel logs -l app.kubernetes.io/part-of=laravel --tail=50
 
 Edit file YAML, lalu re-apply dengan command yang sama (`kubectl apply -k ...`). Kustomize akan menghitung diff dan hanya update resource yang berubah.
 
+#### Preview Perubahan Sebelum Apply
+
+```bash
+kubectl diff -k .k8s/app
+```
+
+Output menunjukkan resource mana yang akan berubah. Yang tidak muncul = `unchanged`.
+
+#### Update Image Deployment
+
+Setelah build & push image baru ke registry (mis. `ghcr.io/mdonnyirwansyah/laravel:v1.2.3`):
+
+1. Edit tag di [app/deployment.yaml](app/deployment.yaml) (field `spec.template.spec.containers[0].image`).
+2. Apply:
+   ```bash
+   kubectl apply -k .k8s/app
+   kubectl -n laravel rollout status deployment/app
+   ```
+
+Kalau tag tidak berubah (mis. tetap `:latest-arm64`) tapi image di registry sudah baru, trigger pull ulang dengan:
+```bash
+kubectl -n laravel rollout restart deployment/app
+```
+Syarat: `imagePullPolicy: Always` (sudah di-set di deployment).
+
+Rollback ke versi sebelumnya kalau release bermasalah:
+```bash
+kubectl -n laravel rollout history deployment/app
+kubectl -n laravel rollout undo deployment/app
+```
+
+#### Update ConfigMap
+
+ConfigMap (`laravel-app`) dikonsumsi via `envFrom` di Deployment & Job. **Env vars tidak auto-reload** — pod harus restart agar nilai baru terbaca.
+
+1. Edit [app/configmap.yaml](app/configmap.yaml).
+2. Apply & restart pod:
+   ```bash
+   kubectl apply -k .k8s/app
+   kubectl -n laravel rollout restart deployment/app
+   kubectl -n laravel rollout status deployment/app
+   ```
+
+Verifikasi nilai env di pod yang sudah restart:
+```bash
+kubectl -n laravel exec deployment/app -- env | grep <NAMA_VAR>
+```
+
+#### Update Image Job Migrate
+
+Job bersifat **immutable** — field `spec.template` tidak bisa di-update setelah Job dibuat. Kalau image di [app/job-migrate.yaml](app/job-migrate.yaml) berubah, Job lama harus dihapus dulu:
+
+1. Edit tag image di [app/job-migrate.yaml](app/job-migrate.yaml).
+2. Delete Job lama, lalu apply:
+   ```bash
+   kubectl -n laravel delete job laravel-migrate --ignore-not-found
+   kubectl apply -k .k8s/app
+   ```
+
+Job baru akan langsung jalan setelah apply.
+
+#### Run Job Migration
+
+Re-run migration tanpa ubah image (mis. setelah tambah migration file dengan tag image yang sama):
+
+```bash
+kubectl -n laravel delete job laravel-migrate --ignore-not-found
+kubectl apply -k .k8s/app
+```
+
+Monitor eksekusi Job:
+```bash
+# Tunggu Job selesai (timeout 5 menit)
+kubectl -n laravel wait --for=condition=complete --timeout=300s job/laravel-migrate
+
+# Cek log
+kubectl -n laravel logs job/laravel-migrate --tail=100
+```
+
+Status Job:
+```bash
+kubectl -n laravel get job laravel-migrate
+kubectl -n laravel describe job laravel-migrate
+```
+
+Catatan: Job memiliki `ttlSecondsAfterFinished: 600`, jadi Job otomatis ke-cleanup 10 menit setelah selesai.
+
 ### Teardown
 
 ```bash

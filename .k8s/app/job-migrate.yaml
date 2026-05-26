@@ -12,6 +12,7 @@ spec:
       containers:
         - name: migrate
           image: ghcr.io/mdonnyirwansyah/laravel:latest-arm64
+          imagePullPolicy: IfNotPresent
           command: ["php", "artisan", "migrate", "--force"]
           envFrom:
             - configMapRef:
